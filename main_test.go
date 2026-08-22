@@ -4,81 +4,112 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
 
-func TestHandlerRoot(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	w := httptest.NewRecorder()
-
-	handler(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected status %d, got %d", http.StatusOK, w.Code)
+func TestHandler(t *testing.T) {
+	tests := []struct {
+		name       string
+		path       string
+		wantStatus int
+		wantBody   string
+	}{
+		{name: "root path", path: "/", wantStatus: http.StatusOK, wantBody: "Hello, World!"},
+		{name: "unknown path", path: "/does-not-exist", wantStatus: http.StatusNotFound},
 	}
-	if body := w.Body.String(); body != "Hello, World!" {
-		t.Fatalf("unexpected body: %q", body)
-	}
-}
 
-func TestHandlerUnknownPathReturns404(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/does-not-exist", nil)
-	w := httptest.NewRecorder()
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			w := httptest.NewRecorder()
 
-	handler(w, req)
+			handler(w, req)
 
-	if w.Code != http.StatusNotFound {
-		t.Fatalf("expected status %d, got %d", http.StatusNotFound, w.Code)
+			if w.Code != tc.wantStatus {
+				t.Fatalf("expected status %d, got %d", tc.wantStatus, w.Code)
+			}
+			if tc.wantBody != "" && w.Body.String() != tc.wantBody {
+				t.Fatalf("unexpected body: %q", w.Body.String())
+			}
+		})
 	}
 }
 
 func TestTimeHandler(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/api/time", nil)
-	w := httptest.NewRecorder()
-
-	timeHandler(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected status %d, got %d", http.StatusOK, w.Code)
+	tests := []struct {
+		name       string
+		wantStatus int
+	}{
+		{name: "returns current time in RFC3339", wantStatus: http.StatusOK},
 	}
 
-	var body map[string]string
-	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
-		t.Fatalf("failed to decode response: %v", err)
-	}
-	if _, ok := body["current_time"]; !ok {
-		t.Fatalf("expected current_time field, got %v", body)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/api/time", nil)
+			w := httptest.NewRecorder()
+
+			timeHandler(w, req)
+
+			if w.Code != tc.wantStatus {
+				t.Fatalf("expected status %d, got %d", tc.wantStatus, w.Code)
+			}
+
+			var body map[string]string
+			if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+				t.Fatalf("failed to decode response: %v", err)
+			}
+			currentTime, ok := body["current_time"]
+			if !ok {
+				t.Fatalf("expected current_time field, got %v", body)
+			}
+			if _, err := time.Parse(time.RFC3339, currentTime); err != nil {
+				t.Fatalf("current_time %q not in RFC3339 format: %v", currentTime, err)
+			}
+		})
 	}
 }
 
 func TestEchoHandler(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/api/echo?msg=hello", nil)
-	w := httptest.NewRecorder()
-
-	echoHandler(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected status %d, got %d", http.StatusOK, w.Code)
+	tests := []struct {
+		name        string
+		path        string
+		wantStatus  int
+		wantMessage string
+		wantErrText string
+	}{
+		{name: "valid msg", path: "/api/echo?msg=hello", wantStatus: http.StatusOK, wantMessage: "hello"},
+		{name: "missing msg param", path: "/api/echo", wantStatus: http.StatusBadRequest, wantErrText: "msg parameter is required"},
+		{name: "empty msg param", path: "/api/echo?msg=", wantStatus: http.StatusBadRequest, wantErrText: "msg parameter is required"},
 	}
 
-	var body map[string]string
-	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
-		t.Fatalf("failed to decode response: %v", err)
-	}
-	if body["message"] != "hello" {
-		t.Fatalf("expected message=hello, got %v", body)
-	}
-}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			w := httptest.NewRecorder()
 
-func TestEchoHandlerMissingMsg(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/api/echo", nil)
-	w := httptest.NewRecorder()
+			echoHandler(w, req)
 
-	echoHandler(w, req)
+			if w.Code != tc.wantStatus {
+				t.Fatalf("expected status %d, got %d", tc.wantStatus, w.Code)
+			}
 
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, w.Code)
+			if tc.wantStatus == http.StatusOK {
+				var body map[string]string
+				if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+					t.Fatalf("failed to decode response: %v", err)
+				}
+				if body["message"] != tc.wantMessage {
+					t.Fatalf("expected message=%q, got %v", tc.wantMessage, body)
+				}
+				return
+			}
+
+			if !strings.Contains(w.Body.String(), tc.wantErrText) {
+				t.Fatalf("expected body to contain %q, got %q", tc.wantErrText, w.Body.String())
+			}
+		})
 	}
 }
 
