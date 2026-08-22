@@ -17,8 +17,22 @@ func TestHandlerRoot(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected status %d, got %d", http.StatusOK, w.Code)
 	}
-	if body := w.Body.String(); body != "Hello, World!" {
-		t.Fatalf("unexpected body: %q", body)
+	if ct := w.Header().Get("Content-Type"); ct != "application/json" {
+		t.Fatalf("expected Content-Type application/json, got %q", ct)
+	}
+
+	var body map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("failed to decode JSON response: %v", err)
+	}
+	if body["message"] != "Hello, World!" {
+		t.Fatalf("expected message=Hello, World!, got %q", body["message"])
+	}
+	if body["service"] != "testRepo" {
+		t.Fatalf("expected service=testRepo, got %q", body["service"])
+	}
+	if body["version"] != "1.0.0" {
+		t.Fatalf("expected version=1.0.0, got %q", body["version"])
 	}
 }
 
